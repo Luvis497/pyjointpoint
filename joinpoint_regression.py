@@ -13,6 +13,12 @@
 
 # -------------------------------
 
+""""
+Ref:
+[1] Kim, H. J., Fay, M. P., Feuer, E. J., & Midthune, D. N. (2000). Permutation tests for joinpoint regression with applications to cancer rates. Statistics in medicine, 19(3), 335-351.
+[2] Liu, B., Kim, H. J., Feuer, E. J., & Graubard, B. I. (2023). Joinpoint regression methods of aggregate outcomes for complex survey data. Journal of Survey Statistics and Methodology, 11(4), 967-989.
+"""
+
 import numpy as np
 import pandas as pd
 import statsmodels.api as sm
@@ -22,7 +28,7 @@ import matplotlib.pyplot as plt
 from scipy.linalg import toeplitz, sqrtm, inv
 import warnings
 import time
-from joblib import Parallel, delayed # <-- 新增导入
+from joblib import Parallel, delayed
 
 # Suppress a common warning from statsmodels when using GLS
 warnings.filterwarnings("ignore", "unobserved_slice_variance", UserWarning)
@@ -300,7 +306,7 @@ def joinpoint_regression(x, y, type='linear', max_joinpoints=3,
                          permutation_alpha=0.05,
                          ar_maxiter=10,
                          num_permutations=1999,
-                         parallel=False, n_jobs=-1): # <-- 新增参数
+                         parallel=False, n_jobs=-1):
     """
     Performs joinpoint regression to identify significant changes in trend.
 
@@ -440,39 +446,30 @@ def joinpoint_regression(x, y, type='linear', max_joinpoints=3,
 
 
 if __name__ == '__main__':
-    # --- 1. 生成模拟数据 ---
-    # 创建一个包含两个真实连接点的时间序列数据
-    np.random.seed(42)
-    x_years = np.arange(1980, 2021) # 41个数据点
 
-    # 真实连接点在 1995 和 2010
+    np.random.seed(42)
+    x_years = np.arange(1980, 2021)
+
     jp1, jp2 = 1995, 2010
 
-    # 分段定义真实的 log(rate)
     y_log_true = np.zeros_like(x_years, dtype=float)
 
-    # 第一段: 1980-1994 (斜率 0.03, 对应 APC ~3%)
     mask1 = x_years < jp1
     y_log_true[mask1] = -4.0 + 0.03 * (x_years[mask1] - 1980)
 
-    # 第二段: 1995-2009 (斜率 -0.02, 对应 APC ~-2%)
     mask2 = (x_years >= jp1) & (x_years < jp2)
     y_log_true[mask2] = y_log_true[mask1][-1] - 0.02 * (x_years[mask2] - x_years[mask1][-1])
 
-    # 第三段: 2010-2020 (斜率 0.01, 对应 APC ~1%)
     mask3 = x_years >= jp2
     y_log_true[mask3] = y_log_true[mask2][-1] + 0.01 * (x_years[mask3] - x_years[mask2][-1])
 
-    # 添加一些噪音
     y_log_observed = y_log_true + np.random.normal(0, 0.05, size=len(x_years))
 
-    # 假设我们分析的是比率，所以使用 log-linear 模型
     rates = np.exp(y_log_observed)
 
-    # --- 2. 设置连接点回归参数 ---
-    # 为了突出性能差异，我们选择一个相对较大的 max_joinpoints
+
     MAX_JP = 4
-    MIN_PTS = 3 # 在连接点之间至少需要3个点
+    MIN_PTS = 3
 
     print("="*60)
     print("Joinpoint Regression Performance Comparison")
@@ -480,18 +477,18 @@ if __name__ == '__main__':
     print(f"Max Joinpoints to test: {MAX_JP}")
     print("="*60)
 
-    # --- 3. 运行串行版本 ---
+
     print("\n--- Running in Serial Mode (parallel=False) ---")
     start_time_serial = time.time()
 
     results_serial = joinpoint_regression(
         x=x_years,
-        y=rates, # 传入原始比率
-        type='log-linear', # 指定模型类型
+        y=rates,
+        type='log-linear',
         max_joinpoints=MAX_JP,
         min_points_between_jp=MIN_PTS,
         model_selection_method='BIC',
-        parallel=False # 禁用并行
+        parallel=False
     )
 
     end_time_serial = time.time()
@@ -504,8 +501,6 @@ if __name__ == '__main__':
     print("\nModel Selection Summary (Serial):")
     print(results_serial['model_summary_df'])
 
-
-    # --- 4. 运行并行版本 ---
     print("\n" + "="*60)
     print("\n--- Running in Parallel Mode (parallel=True) ---")
     start_time_parallel = time.time()
@@ -517,8 +512,8 @@ if __name__ == '__main__':
         max_joinpoints=MAX_JP,
         min_points_between_jp=MIN_PTS,
         model_selection_method='BIC',
-        parallel=True, # 启用并行
-        n_jobs=-1      # 使用所有可用的CPU核心
+        parallel=True,
+        n_jobs=-1
     )
 
     end_time_parallel = time.time()
@@ -541,31 +536,29 @@ if __name__ == '__main__':
         print(f"Speedup factor:          {speedup:.2f}x")
     print("="*60)
 
-    # 验证结果是否一致
+
     assert results_serial['best_k'] == results_parallel['best_k'], "Best k differs between serial and parallel runs!"
     assert results_serial['best_joinpoints'] == results_parallel['best_joinpoints'], "Best joinpoints differ!"
     print("\n✅ Verification successful: Serial and parallel runs produced identical results.")
 
-    # --- 6. 可视化最终结果 ---
-    final_results = results_parallel # 使用并行或串行结果均可
+    final_results = results_parallel
 
     plt.figure(figsize=(12, 7))
     plt.plot(x_years, y_log_observed, 'o', label='Observed log(Rate)', alpha=0.6)
 
-    # 绘制拟合的连接点模型
     if final_results['input_type'] == 'log-linear':
         plt.plot(x_years, final_results['fitted_values'], 'r-', linewidth=2, label=f"Fitted Joinpoint Model (k={final_results['best_k']})")
     else: # if linear
          plt.plot(x_years, np.log(final_results['fitted_values']), 'r-', linewidth=2, label=f"Fitted Joinpoint Model (k={final_results['best_k']})")
 
-    # 标记连接点
+
     for jp in final_results['best_joinpoints']:
         plt.axvline(x=jp, color='g', linestyle='--', label=f'Joinpoint at {jp}')
 
     plt.title('Joinpoint Regression Results')
     plt.xlabel('Year')
     plt.ylabel('log(Rate)')
-    # 合并图例中的重复标签
+
     handles, labels = plt.gca().get_legend_handles_labels()
     by_label = dict(zip(labels, handles))
     plt.legend(by_label.values(), by_label.keys())
